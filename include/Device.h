@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <memory>
 #include <atomic>
+#include <sstream>
 #include <vector>
 #include <thread>
 #include <mutex>
@@ -33,12 +34,19 @@ public:
     int64_t GetHandle() const { return m_handle;}
     void SetHandle(uint64_t handle) { m_handle = handle;}
 
+    std::string ToString() const
+    {
+        std::stringstream ss;
+        ss << "Device id[" << m_id << "] handle[" << m_handle << "]" << std::endl;
+        return ss.str();
+    }
+
 private:
     static uint64_t GenerateSN();
 
 private:
     int64_t m_id = 0;
-    uint64_t m_handle = -1;
+    int64_t m_handle = -1;
 };
 
 struct Frame
@@ -70,7 +78,7 @@ private:
     void PushStreamWorkFunc(uint64_t playHandle, const std::vector<Frame>& frames);
 private:
     static std::atomic<uint64_t> s_useCount;
-    static std::atomic<uint64_t> s_handle;
+    static std::atomic<int64_t> s_handle;
     static std::uint64_t s_playHandle;
 
     std::map<uint64_t, std::shared_ptr<std::thread>> m_playid2Thread;

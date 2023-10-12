@@ -1,5 +1,6 @@
 #include "Device.h"
 #include "Log.h"
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <mutex>
@@ -22,7 +23,7 @@ uint64_t IDevice::GenerateSN()
 }
 
 std::atomic<uint64_t> VirtualDevice::s_useCount{0};
-std::atomic<uint64_t> VirtualDevice::s_handle{0};
+std::atomic<int64_t> VirtualDevice::s_handle{0};
 std::uint64_t VirtualDevice::s_playHandle {0};
 
 VirtualDevice::VirtualDevice()
@@ -90,7 +91,7 @@ uint64_t VirtualDevice::RealPlay()
 
     // 2. 码流分析/码流分帧
     auto frames = SplitFrame(&data[0], dataSize);
-
+    // std::this_thread::sleep_for(std::chrono::seconds(3));
     // 3. 码流推送
     // 如果在这里直接去推送码流，会有什么问题？
     // 应该开一条线程出去，然后由这条线程去做码流推送逻辑
@@ -124,12 +125,80 @@ bool VirtualDevice::Stop(uint64_t playHandle)
 std::vector<Frame> VirtualDevice::SplitFrame(const uint8_t* data, size_t size)
 {
     BLOG("Do SplitFrame");
-    return {};
+
+    std::vector<Frame> frames;
+    size_t last = -1;
+    for (size_t i = 0; i < size; i++)
+    {
+        // 找到nalu 起始码 00 00 01 65/67/68/41
+        if(i + 3 < size)
+        {
+            if(data[i] == 0x00 && data[i + 1] == 0x00 && data[i + 2] == 0x01)
+            {
+                // 首帧开头
+                if(last == -1)
+                {
+                    last = i;
+                    continue;
+                }
+
+                // 找到了起始码,需要做帧类型判断
+                uint8_t flag = data[i + 3] & 0x1f;
+                Frame frame;
+                if(flag == 7)
+                {
+                    frame.p = const_cast<uint8_t*>(data + last);
+                    frame.len = i - last; // 帧长度
+                    last = i;
+                    // BLOG("SPS Frame index:" + std::to_string(frames.size()));
+                }
+                else if(flag == 8)
+                {
+                    frame.p = const_cast<uint8_t*>(data + last);
+                    frame.len = i - last; // 帧长度
+                    last = i;
+                    // BLOG("PPS Frame index:" + std::to_string(frames.size()));
+                }
+                else if(flag == 5)
+                {
+                    frame.p = const_cast<uint8_t*>(data + last);
+                    frame.len = i - last; // 帧长度
+                    last = i;
+                    // 打印I帧当前下标
+                    BLOG("IFrame index:" + std::to_string(frames.size()));
+                }
+                else if(flag == 1)
+                {
+                    frame.p = const_cast<uint8_t*>(data + last);
+                    frame.len = i - last; // 帧长度
+                    last = i;
+                    // BLOG("PFrame index:" + std::to_string(frames.size()));
+                }
+                else
+                {
+                    BLOG("Invalid frame.");
+                    continue;
+                }
+
+                frames.emplace_back(frame);
+            }
+
+            // if(*(int*)(data + i) == 1)
+            // {
+            // }
+        }
+    }
+
+    std::string msg = "total frames count:" + std::to_string(frames.size());
+    BLOG(msg);
+
+    return frames;
 }
 
 void VirtualDevice::InputStreamFrame(const Frame& frame)
 {
     BLOG("Do InputStreamFrame");
+    
 }
 
 void VirtualDevice::PushStreamWorkFunc(uint64_t playHandle, const std::vector<Frame>& frames)
@@ -141,6 +210,11 @@ void VirtualDevice::PushStreamWorkFunc(uint64_t playHandle, const std::vector<Fr
         auto it = m_playid2Status.find(playHandle);
         if(it->second == 0)
             break;
+
+        for(const auto& frame : frames)
+        {
+            InputStreamFrame(frame);
+        }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
     }
